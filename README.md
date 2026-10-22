@@ -60,7 +60,7 @@ scripts/*.ps1                  patch application, smoke tests, build info, bundl
    The builder installs the matching Visual C++ toolset (VC15 for PHP 7.3) and the official
    dependency bundles, builds with PGO and packages like the official windows.php.net releases.
 3. `package` smoke-tests every archive (version banner, thread safety, modules, `php-cgi.exe`,
-   clean out-of-memory fatal error, a multipart/form-data POST through php-cgi), adds `BUILD-INFO.txt`,
+   out-of-memory handling (the patch terminates with exit code 1 instead of 255, which proves it is active), a multipart/form-data POST through php-cgi), adds `BUILD-INFO.txt`,
    creates the bundles and `SHA256SUMS.txt`, and publishes a release when a tag was given.
 
 A full run takes roughly 45 minutes (about 35 for the two builds).

@@ -78,12 +78,14 @@ foreach ($zip in $archives) {
         $echo = (& $php -n -r "echo 'ok';" 2>&1 | Out-String).Trim()
         if ($echo -ne 'ok') { throw "php -r failed: $echo" }
 
-        # Out-of-memory must end in a clean fatal error (exit 255), not a crash.
+        # Out-of-memory: the php2shell mitigation terminates the process right away (_exit(1)) after
+        # printing the fatal error instead of unwinding via bailout (unpatched PHP exits with 255).
+        # Exit code 1 plus the message therefore also proves that the patch is active.
         $oom = (& $php -n -d memory_limit=2M -r '$a = str_repeat("x", 64 * 1024 * 1024);' 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 255 -or $oom -notmatch 'Allowed memory size') {
-            throw "OOM handling unexpected (exit $LASTEXITCODE): $oom"
+        if ($LASTEXITCODE -ne 1 -or $oom -notmatch 'Allowed memory size') {
+            throw "OOM handling unexpected (exit $LASTEXITCODE, expected 1 = immediate termination by the patch): $oom"
         }
-        Write-Host 'OOM handling: clean fatal error'
+        Write-Host 'OOM handling: fatal error + immediate termination (exit 1), patch active'
 
         # multipart/form-data through php-cgi exercises main/rfc1867.c and main/php_variables.c.
         $script = Join-Path $dir 'smoke-multipart.php'
