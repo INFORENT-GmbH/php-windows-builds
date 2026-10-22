@@ -1,0 +1,14 @@
+{
+  "php_version": "7.3.31",
+  "source": {
+    "repository": "php/php-src",
+    "ref": "php-7.3.31",
+    "commit": "b54c8f052134668b13c4a3177f16b08d82233ade"
+  },
+  "builder": {
+    "repository": "php/php-windows-builder",
+    "ref": "v1",
+    "commit": "29352c0ef9e8ce65264ea9e287881a6f7758a953"
+  },
+  "notes": "PHP 7.3.31 as shipped with IceWarp Server for Windows, plus the php2shell mitigations (CVE-2026-109618, CVE-2026-109619)."
+}

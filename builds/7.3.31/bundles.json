@@ -1,0 +1,9 @@
+{
+  "icewarp": {
+    "description": "Drop-in layout for IceWarp Server (Windows): IceWarp runs PHP as FastCGI, so its php.exe is the CGI binary and php-cli.exe is the command line binary.",
+    "rename": {
+      "php-cgi.exe": "php.exe",
+      "php.exe": "php-cli.exe"
+    }
+  }
+}

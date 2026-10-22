@@ -1,0 +1,173 @@
+name: Build PHP
+run-name: "PHP ${{ inputs.version || github.ref_name }}${{ inputs.release-tag != '' && format(' → release {0}', inputs.release-tag) || '' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build definition (directory under builds/)'
+        required: true
+        default: '7.3.31'
+      arch-list:
+        description: 'Architectures, comma separated (x64, x86)'
+        required: true
+        default: 'x64'
+      ts-list:
+        description: 'Thread safety, comma separated (nts, ts)'
+        required: true
+        default: 'nts,ts'
+      release-tag:
+        description: 'Create a GitHub release with this tag (e.g. php-7.3.31-r1); empty = artifacts only'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'php-*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.cfg.outputs.version }}
+      php_version: ${{ steps.cfg.outputs.php_version }}
+      matrix: ${{ steps.cfg.outputs.matrix }}
+      release_tag: ${{ steps.cfg.outputs.release_tag }}
+      source_repo: ${{ steps.cfg.outputs.source_repo }}
+      source_ref: ${{ steps.cfg.outputs.source_ref }}
+      source_commit: ${{ steps.cfg.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: cfg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"                 # php-7.3.31-r1
+            version="${tag#php-}"; version="${version%-r*}"
+            archs="x64"; tss="nts,ts"; release_tag="$tag"
+          else
+            version="${{ inputs.version }}"
+            archs="${{ inputs.arch-list }}"
+            tss="${{ inputs.ts-list }}"
+            release_tag="${{ inputs.release-tag }}"
+          fi
+          def="builds/$version"
+          [ -f "$def/source.json" ] || { echo "::error::$def/source.json not found"; exit 1; }
+          if [ -n "$release_tag" ] && gh release view "$release_tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release $release_tag already exists"; exit 1
+          fi
+          matrix=$(jq -cn --arg a "$archs" --arg t "$tss" \
+            '{arch: ($a|split(",")|map(gsub(" ";""))|map(select(length>0))), ts: ($t|split(",")|map(gsub(" ";""))|map(select(length>0)))}')
+          {
+            echo "version=$version"
+            echo "matrix=$matrix"
+            echo "release_tag=$release_tag"
+            jq -r '"php_version=\(.php_version)\nsource_repo=\(.source.repository)\nsource_ref=\(.source.ref)\nsource_commit=\(.source.commit)"' "$def/source.json"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} ${{ matrix.ts }}
+    needs: prepare
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - name: Checkout PHP source (${{ needs.prepare.outputs.source_repo }} ${{ needs.prepare.outputs.source_ref }})
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.source_repo }}
+          ref: ${{ needs.prepare.outputs.source_commit }}
+          fetch-depth: 1
+
+      - name: Checkout build definitions
+        uses: actions/checkout@v6
+        with:
+          path: .inforent
+
+      - name: Apply patches
+        shell: pwsh
+        run: |
+          .inforent/scripts/Apply-Patches.ps1 -Definition .inforent/builds/${{ needs.prepare.outputs.version }}
+          Remove-Item -Recurse -Force .inforent
+
+      - name: Build PHP ${{ needs.prepare.outputs.php_version }} (${{ matrix.ts }} ${{ matrix.arch }})
+        uses: php/php-windows-builder/php@29352c0ef9e8ce65264ea9e287881a6f7758a953 # v1
+        with:
+          arch: ${{ matrix.arch }}
+          ts: ${{ matrix.ts }}
+          sbom: 'false'
+
+  package:
+    name: Test, bundle${{ needs.prepare.outputs.release_tag != '' && ', release' || '' }}
+    needs: [prepare, build]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-source-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem artifacts | ForEach-Object { '{0,12:n0}  {1}' -f $_.Length, $_.Name }
+
+      - name: Smoke tests
+        shell: pwsh
+        run: scripts/Test-Build.ps1 -ArtifactsDirectory artifacts -ExpectedVersion '${{ needs.prepare.outputs.php_version }}'
+
+      - name: Build info and release notes
+        shell: pwsh
+        run: |
+          scripts/New-BuildInfo.ps1 -Definition builds/${{ needs.prepare.outputs.version }} `
+            -OutputDirectory release `
+            -Repository '${{ github.repository }}' -RepositorySha '${{ github.sha }}' `
+            -RunUrl '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' `
+            -ReleaseTag '${{ needs.prepare.outputs.release_tag }}' -RunnerImage 'windows-2022'
+
+      - name: Assemble release files
+        shell: pwsh
+        run: |
+          scripts/New-Bundle.ps1 -ArtifactsDirectory artifacts -Definition builds/${{ needs.prepare.outputs.version }} `
+            -OutputDirectory release -BuildInfoFile release/BUILD-INFO.txt
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ needs.prepare.outputs.php_version }}
+          path: release
+          if-no-files-found: error
+
+      - name: Create GitHub release ${{ needs.prepare.outputs.release_tag }}
+        if: needs.prepare.outputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.release_tag }}
+          PHP_VERSION: ${{ needs.prepare.outputs.php_version }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${{ github.event_name }}" != "push" ]; then args+=(--target "$GITHUB_SHA"); fi
+          files=$(find release -maxdepth 1 -type f ! -name release-notes.md | sort)
+          gh release create "$TAG" $files \
+            --title "PHP $PHP_VERSION for Windows ($TAG)" \
+            --notes-file release/release-notes.md \
+            "${args[@]}"
