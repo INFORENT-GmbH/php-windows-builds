@@ -201,7 +201,7 @@ jobs:
             {
               gh release view "$TAG" --json body --jq .body
               echo
-              echo "**Added $(date -u +%Y-%m-%d) by [run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}):** $(cd release && ls *.zip | sed 's/^/`/; s/$/`/' | paste -sd ', ')"
+              echo "**Added $(date -u +%Y-%m-%d) by [run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}):** $(cd release && ls -1 *.zip | sed 's/^/`/; s/$/`/' | paste -sd ', ')"
             } > notes.md
             gh release edit "$TAG" --notes-file notes.md
           else
