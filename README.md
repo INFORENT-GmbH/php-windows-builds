@@ -67,7 +67,7 @@ A full run takes roughly 45 minutes (about 35 for the two builds).
 
 ### Running it
 
-- **Actions → Build PHP → Run workflow**: `version` (default `7.3.31`), `arch-list`, `ts-list`,
+- **Actions → Build PHP → Run workflow**: `version` (default `7.3.31`), `arch-list`, `ts-list`, `build-run-id` (re-package the artifacts of an earlier run without rebuilding),
   optional `release-tag`. Without a release tag the result is only a workflow artifact
   (`release-<version>`), useful for testing.
 - **Tag push**: `git tag php-7.3.31-r1 && git push origin php-7.3.31-r1` builds `x64` × `nts,ts`

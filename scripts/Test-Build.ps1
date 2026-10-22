@@ -63,8 +63,8 @@ foreach ($zip in $archives) {
         Write-Host $banner.Trim()
         if ($banner -notmatch ('PHP ' + [regex]::Escape($ExpectedVersion) + ' ')) { throw "Version banner does not report PHP $ExpectedVersion" }
         $expectNts = $zip.Name -match '-nts-'
-        if ($expectNts -and $banner -notmatch '\(NTS') { throw 'Expected an NTS build' }
-        if (-not $expectNts -and $banner -notmatch '\(ZTS') { throw 'Expected a TS (ZTS) build' }
+        if ($expectNts -and $banner -notmatch '\(\s*NTS') { throw 'Expected an NTS build' }
+        if (-not $expectNts -and $banner -notmatch '\(\s*ZTS') { throw 'Expected a TS (ZTS) build' }
 
         $cgiBanner = (& $cgi -n -v 2>&1 | Out-String)
         if ($cgiBanner -notmatch 'cgi-fcgi') { throw "php-cgi.exe banner unexpected: $cgiBanner" }

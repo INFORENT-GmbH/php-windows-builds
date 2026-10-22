@@ -8,6 +8,7 @@ param(
     [Parameter(Mandatory = $true)] [string] $Repository,
     [Parameter(Mandatory = $true)] [string] $RepositorySha,
     [Parameter(Mandatory = $true)] [string] $RunUrl,
+    [string] $PackageRunUrl = '',
     [string] $ReleaseTag = '',
     [string] $RunnerImage = ''
 )
@@ -23,6 +24,7 @@ $lines = @(
     "Built:            $now",
     "Build repository: https://github.com/$Repository @ $RepositorySha",
     "Build run:        $RunUrl",
+    "Package run:      $(if ($PackageRunUrl -and $PackageRunUrl -ne $RunUrl) { $PackageRunUrl } else { 'same run' })",
     "Builder:          https://github.com/$($source.builder.repository) @ $($source.builder.commit) ($($source.builder.ref))",
     "Runner image:     $RunnerImage",
     "",
@@ -62,7 +64,7 @@ $patchTable
 - ``php-debug-pack-*`` / ``php-devel-pack-*`` - debug symbols and headers, ``php-test-pack-*`` - test suite.
 - ``SHA256SUMS.txt`` - checksums of all files; ``BUILD-INFO.txt`` is also inside every archive.
 
-Provenance: [build run]($RunUrl), repository ``$Repository`` @ ``$RepositorySha``. The patched source is reproducible from the tag and the patch files in ``builds/$($source.php_version)/``.
+Provenance: [build run]($RunUrl)$(if ($PackageRunUrl -and $PackageRunUrl -ne $RunUrl) { ", [packaging run]($PackageRunUrl)" }), repository ``$Repository`` @ ``$RepositorySha``. The patched source is reproducible from the tag and the patch files in ``builds/$($source.php_version)/``.
 "@
 Set-Content -Path (Join-Path $OutputDirectory 'release-notes.md') -Value $notes -Encoding utf8
 Write-Host (Get-Content (Join-Path $OutputDirectory 'BUILD-INFO.txt') -Raw)

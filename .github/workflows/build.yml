@@ -20,6 +20,10 @@ on:
         description: 'Create a GitHub release with this tag (e.g. php-7.3.31-r1); empty = artifacts only'
         required: false
         default: ''
+      build-run-id:
+        description: 'Re-package the build artifacts of this earlier workflow run instead of building again (empty = build)'
+        required: false
+        default: ''
   push:
     tags:
       - 'php-*'
@@ -40,6 +44,7 @@ jobs:
       php_version: ${{ steps.cfg.outputs.php_version }}
       matrix: ${{ steps.cfg.outputs.matrix }}
       release_tag: ${{ steps.cfg.outputs.release_tag }}
+      build_run_id: ${{ steps.cfg.outputs.build_run_id }}
       source_repo: ${{ steps.cfg.outputs.source_repo }}
       source_ref: ${{ steps.cfg.outputs.source_ref }}
       source_commit: ${{ steps.cfg.outputs.source_commit }}
@@ -54,12 +59,13 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             tag="${GITHUB_REF_NAME}"                 # php-7.3.31-r1
             version="${tag#php-}"; version="${version%-r*}"
-            archs="x64"; tss="nts,ts"; release_tag="$tag"
+            archs="x64"; tss="nts,ts"; release_tag="$tag"; build_run_id=""
           else
             version="${{ inputs.version }}"
             archs="${{ inputs.arch-list }}"
             tss="${{ inputs.ts-list }}"
             release_tag="${{ inputs.release-tag }}"
+            build_run_id="${{ inputs.build-run-id }}"
           fi
           def="builds/$version"
           [ -f "$def/source.json" ] || { echo "::error::$def/source.json not found"; exit 1; }
@@ -72,12 +78,14 @@ jobs:
             echo "version=$version"
             echo "matrix=$matrix"
             echo "release_tag=$release_tag"
+            echo "build_run_id=$build_run_id"
             jq -r '"php_version=\(.php_version)\nsource_repo=\(.source.repository)\nsource_ref=\(.source.ref)\nsource_commit=\(.source.commit)"' "$def/source.json"
           } | tee -a "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.arch }} ${{ matrix.ts }}
     needs: prepare
+    if: needs.prepare.outputs.build_run_id == ''
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -114,16 +122,19 @@ jobs:
   package:
     name: Test, bundle${{ needs.prepare.outputs.release_tag != '' && ', release' || '' }}
     needs: [prepare, build]
+    if: always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download build artifacts
+      - name: Download build artifacts${{ needs.prepare.outputs.build_run_id != '' && format(' of run {0}', needs.prepare.outputs.build_run_id) || '' }}
         uses: actions/download-artifact@v8
         with:
           pattern: artifacts-source-*
           path: artifacts
           merge-multiple: true
+          run-id: ${{ needs.prepare.outputs.build_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: List artifacts
         shell: pwsh
@@ -139,7 +150,8 @@ jobs:
           scripts/New-BuildInfo.ps1 -Definition builds/${{ needs.prepare.outputs.version }} `
             -OutputDirectory release `
             -Repository '${{ github.repository }}' -RepositorySha '${{ github.sha }}' `
-            -RunUrl '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' `
+            -RunUrl '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ needs.prepare.outputs.build_run_id || github.run_id }}' `
+            -PackageRunUrl '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' `
             -ReleaseTag '${{ needs.prepare.outputs.release_tag }}' -RunnerImage 'windows-2022'
 
       - name: Assemble release files
