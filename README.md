@@ -45,6 +45,23 @@ Then: stop the IceWarp services, back up the `php` folder, copy the bundle conte
 bundled extensions), start the services and check `php.exe -v` / `php-cli.exe -v` again plus a
 WebClient login. The build date in `-v` distinguishes the patched build from the original 7.3.31.
 
+## Verifying the fix on a server
+
+`scripts/Verify-Fix.ps1` checks an installed PHP (not an attack - a positive test). It runs the real
+binaries from the folder, so it tests the loaded `php7ts.dll`/`php7.dll`, and proves the mitigation by
+its behaviour: the patched memory manager terminates with **exit code 1** on an allocation failure,
+where an unpatched PHP exits with 255.
+
+```powershell
+# on the IceWarp server, in an elevated PowerShell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\Verify-Fix.ps1 -PhpDir 'C:\Program Files (x86)\IceWarp\php'
+```
+
+It reports PATCHED / NOT PATCHED per binary and warns if the engine Build Date is not the expected one
+(a sign that `php.exe` was replaced but the DLL was not). After replacing files, restart the IceWarp
+services so the running `php.exe` instances reload the new DLL, then re-run.
+
 ## How a build works
 
 ```
