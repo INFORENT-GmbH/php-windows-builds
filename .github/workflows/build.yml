@@ -24,6 +24,11 @@ on:
         description: 'Re-package the build artifacts of this earlier workflow run instead of building again (empty = build)'
         required: false
         default: ''
+      append-release:
+        type: boolean
+        description: 'Add the files to an existing release with the given tag (e.g. another architecture) instead of failing'
+        required: false
+        default: false
   push:
     tags:
       - 'php-*'
@@ -45,6 +50,7 @@ jobs:
       matrix: ${{ steps.cfg.outputs.matrix }}
       release_tag: ${{ steps.cfg.outputs.release_tag }}
       build_run_id: ${{ steps.cfg.outputs.build_run_id }}
+      release_exists: ${{ steps.cfg.outputs.release_exists }}
       source_repo: ${{ steps.cfg.outputs.source_repo }}
       source_ref: ${{ steps.cfg.outputs.source_ref }}
       source_commit: ${{ steps.cfg.outputs.source_commit }}
@@ -59,18 +65,24 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             tag="${GITHUB_REF_NAME}"                 # php-7.3.31-r1
             version="${tag#php-}"; version="${version%-r*}"
-            archs="x64"; tss="nts,ts"; release_tag="$tag"; build_run_id=""
+            archs="x64,x86"; tss="nts,ts"; release_tag="$tag"; build_run_id=""; append="false"
           else
             version="${{ inputs.version }}"
             archs="${{ inputs.arch-list }}"
             tss="${{ inputs.ts-list }}"
             release_tag="${{ inputs.release-tag }}"
             build_run_id="${{ inputs.build-run-id }}"
+            append="${{ inputs.append-release }}"
           fi
           def="builds/$version"
           [ -f "$def/source.json" ] || { echo "::error::$def/source.json not found"; exit 1; }
+          release_exists="false"
           if [ -n "$release_tag" ] && gh release view "$release_tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::release $release_tag already exists"; exit 1
+            if [ "$append" = "true" ]; then
+              release_exists="true"; echo "release $release_tag exists, files will be added to it"
+            else
+              echo "::error::release $release_tag already exists (set append-release to add files to it)"; exit 1
+            fi
           fi
           matrix=$(jq -cn --arg a "$archs" --arg t "$tss" \
             '{arch: ($a|split(",")|map(gsub(" ";""))|map(select(length>0))), ts: ($t|split(",")|map(gsub(" ";""))|map(select(length>0)))}')
@@ -79,6 +91,7 @@ jobs:
             echo "matrix=$matrix"
             echo "release_tag=$release_tag"
             echo "build_run_id=$build_run_id"
+            echo "release_exists=$release_exists"
             jq -r '"php_version=\(.php_version)\nsource_repo=\(.source.repository)\nsource_ref=\(.source.ref)\nsource_commit=\(.source.commit)"' "$def/source.json"
           } | tee -a "$GITHUB_OUTPUT"
 
@@ -167,19 +180,36 @@ jobs:
           path: release
           if-no-files-found: error
 
-      - name: Create GitHub release ${{ needs.prepare.outputs.release_tag }}
+      - name: ${{ needs.prepare.outputs.release_exists == 'true' && 'Add files to' || 'Create' }} GitHub release ${{ needs.prepare.outputs.release_tag }}
         if: needs.prepare.outputs.release_tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.release_tag }}
           PHP_VERSION: ${{ needs.prepare.outputs.php_version }}
+          EXISTS: ${{ needs.prepare.outputs.release_exists }}
         run: |
           set -euo pipefail
-          args=()
-          if [ "${{ github.event_name }}" != "push" ]; then args+=(--target "$GITHUB_SHA"); fi
-          files=$(find release -maxdepth 1 -type f ! -name release-notes.md | sort)
-          gh release create "$TAG" $files \
-            --title "PHP $PHP_VERSION for Windows ($TAG)" \
-            --notes-file release/release-notes.md \
-            "${args[@]}"
+          if [ "$EXISTS" = "true" ]; then
+            # Merge checksums: existing entries win unless the file is replaced by this run.
+            gh release download "$TAG" -p SHA256SUMS.txt -O existing-sums.txt || : > existing-sums.txt
+            new_names=$(awk '{print $2}' release/SHA256SUMS.txt | sort)
+            { awk 'NR==FNR{skip[$0]=1; next} !($2 in skip)' <(echo "$new_names") existing-sums.txt; cat release/SHA256SUMS.txt; } | sort -k2 > merged-sums.txt
+            mv merged-sums.txt release/SHA256SUMS.txt
+            files=$(find release -maxdepth 1 -type f ! -name release-notes.md | sort)
+            gh release upload "$TAG" $files --clobber
+            {
+              gh release view "$TAG" --json body --jq .body
+              echo
+              echo "**Added $(date -u +%Y-%m-%d) by [run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}):** $(cd release && ls *.zip | sed 's/^/`/; s/$/`/' | paste -sd ', ')"
+            } > notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            args=()
+            if [ "${{ github.event_name }}" != "push" ]; then args+=(--target "$GITHUB_SHA"); fi
+            files=$(find release -maxdepth 1 -type f ! -name release-notes.md | sort)
+            gh release create "$TAG" $files \
+              --title "PHP $PHP_VERSION for Windows ($TAG)" \
+              --notes-file release/release-notes.md \
+              "${args[@]}"
+          fi

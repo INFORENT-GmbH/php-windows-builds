@@ -37,6 +37,7 @@ Before replacing anything, confirm on the server which flavour (thread safety) I
 & 'C:\Program Files\IceWarp\php\php.exe' -v        # expect "(cgi-fcgi) ... NTS" or "... ZTS"
 & 'C:\Program Files\IceWarp\php\php-cli.exe' -v    # expect "(cli)"
 Test-Path 'C:\Program Files\IceWarp\php\php7ts.dll' # True = thread safe build -> use the -ts- bundle
+# 32-bit IceWarp (C:\Program Files (x86)\IceWarp): use the -x86 bundles
 ```
 
 Then: stop the IceWarp services, back up the `php` folder, copy the bundle contents over it
@@ -67,11 +68,13 @@ A full run takes roughly 45 minutes (about 35 for the two builds).
 
 ### Running it
 
-- **Actions → Build PHP → Run workflow**: `version` (default `7.3.31`), `arch-list`, `ts-list`, `build-run-id` (re-package the artifacts of an earlier run without rebuilding),
+- **Actions → Build PHP → Run workflow**: `version` (default `7.3.31`), `arch-list`, `ts-list`, `build-run-id` (re-package the artifacts of an earlier run without rebuilding), `append-release`,
   optional `release-tag`. Without a release tag the result is only a workflow artifact
   (`release-<version>`), useful for testing.
-- **Tag push**: `git tag php-7.3.31-r1 && git push origin php-7.3.31-r1` builds `x64` × `nts,ts`
+- **Tag push**: `git tag php-7.3.31-r1 && git push origin php-7.3.31-r1` builds `x64,x86` × `nts,ts`
   and publishes the release.
+- `append-release`: add the files of a run (for example another architecture) to an existing release
+  instead of failing; `SHA256SUMS.txt` is merged.
 
 ### Adding a version or a patch
 
